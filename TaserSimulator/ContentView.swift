@@ -86,111 +86,192 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            RadialGradient(colors: [Color(red: 0.10, green: 0.14, blue: 0.22), .black], center: .top, startRadius: 80, endRadius: 720)
-                .ignoresSafeArea()
+            LinearGradient(
+                colors: [Color.black, Color(red: 0.025, green: 0.027, blue: 0.033), Color(red: 0.08, green: 0.0, blue: 0.0)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
-            VStack(spacing: 28) {
-                VStack(spacing: 8) {
-                    Text("TASER")
-                        .font(.system(size: 46, weight: .black, design: .rounded))
-                        .tracking(7)
-                        .foregroundStyle(.yellow)
-                    Text("SIMULATOR")
-                        .font(.headline.monospaced())
-                        .tracking(5)
-                        .foregroundStyle(.white.opacity(0.75))
+            VStack(spacing: 22) {
+                VStack(spacing: 6) {
+                    Text("BLACKOUT")
+                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .tracking(8)
+                        .foregroundStyle(.white)
+                    Text("TASER SIMULATOR")
+                        .font(.caption.monospaced().weight(.semibold))
+                        .tracking(4)
+                        .foregroundStyle(.red.opacity(0.85))
                 }
+                .padding(.top, 10)
 
                 taserBody
                     .scaleEffect(controller.isFiring && pulse ? 1.025 : 1.0)
                     .animation(.easeInOut(duration: 0.08).repeat(while: controller.isFiring), value: pulse)
 
-                Button {
-                    controller.fire()
-                    pulse.toggle()
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: controller.isFiring ? "bolt.fill" : "bolt.circle.fill")
-                        Text(controller.isFiring ? "FIRING" : "PRESS TO FIRE")
-                    }
-                    .font(.title2.weight(.black))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 22)
-                    .foregroundStyle(.black)
-                    .background(controller.isFiring ? Color.yellow : Color.orange)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .shadow(color: .yellow.opacity(controller.isFiring ? 0.85 : 0.35), radius: controller.isFiring ? 28 : 12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.45), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(controller.isFiring)
+                Text(controller.isFiring ? "DISCHARGING" : "READY")
+                    .font(.headline.monospaced().weight(.heavy))
+                    .tracking(4)
+                    .foregroundStyle(controller.isFiring ? .red : .white.opacity(0.72))
+                    .padding(.top, 4)
 
-                Text("Flashes the camera LED and plays an electric crackle sound. For entertainment only.")
+                Text("Tap the red activation button on the taser body to flash the LED and play the sound.")
                     .font(.footnote)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.55))
-                    .padding(.horizontal)
+                    .foregroundStyle(.white.opacity(0.48))
+                    .padding(.horizontal, 22)
             }
-            .padding(24)
+            .padding(22)
         }
     }
 
     private var taserBody: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 38, style: .continuous)
-                .fill(LinearGradient(colors: [Color(red: 0.95, green: 0.78, blue: 0.12), Color(red: 0.68, green: 0.43, blue: 0.05)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 250, height: 430)
-                .shadow(color: .black.opacity(0.55), radius: 30, y: 22)
+            // Front cartridge / muzzle housing
+            RoundedRectangle(cornerRadius: 34, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.18, green: 0.18, blue: 0.20), Color(red: 0.015, green: 0.015, blue: 0.018)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 252, height: 410)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 34)
+                        .stroke(LinearGradient(colors: [.white.opacity(0.18), .black.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 2)
+                )
+                .shadow(color: .red.opacity(controller.isFiring ? 0.45 : 0.08), radius: controller.isFiring ? 28 : 10)
+                .shadow(color: .black.opacity(0.75), radius: 34, y: 24)
 
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(.black.opacity(0.82))
-                .frame(width: 172, height: 250)
-                .offset(y: 72)
+            // Grip
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.08, green: 0.08, blue: 0.09), Color.black],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 166, height: 228)
+                .offset(y: 100)
+                .overlay(
+                    VStack(spacing: 10) {
+                        ForEach(0..<7) { _ in
+                            Capsule()
+                                .fill(.white.opacity(0.075))
+                                .frame(width: 108, height: 9)
+                        }
+                    }
+                    .offset(y: 100)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 30)
+                        .stroke(.white.opacity(0.08), lineWidth: 1)
+                        .offset(y: 100)
+                )
 
-            VStack(spacing: 22) {
-                HStack(spacing: 50) {
+            // Top rail
+            VStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.black.opacity(0.92))
+                    .frame(width: 178, height: 28)
+                    .overlay(
+                        HStack(spacing: 12) {
+                            ForEach(0..<6) { _ in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(.white.opacity(0.13))
+                                    .frame(width: 10, height: 18)
+                            }
+                        }
+                    )
+                    .padding(.top, 22)
+                Spacer()
+            }
+            .frame(width: 252, height: 410)
+
+            // Probes and status screen
+            VStack(spacing: 20) {
+                HStack(spacing: 46) {
                     probeCircle
                     probeCircle
                 }
-                .padding(.top, 34)
+                .padding(.top, 64)
 
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.black.opacity(0.7))
-                    .frame(width: 138, height: 58)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.black.opacity(0.82))
+                    .frame(width: 145, height: 64)
                     .overlay(
-                        VStack(spacing: 4) {
-                            Text(controller.isFiring ? "ARMED" : "SAFE")
-                                .font(.caption2.monospaced().weight(.bold))
-                                .foregroundStyle(controller.isFiring ? .red : .green)
-                            HStack(spacing: 4) {
+                        VStack(spacing: 5) {
+                            Text(controller.isFiring ? "ACTIVE" : "STANDBY")
+                                .font(.caption2.monospaced().weight(.black))
+                                .foregroundStyle(controller.isFiring ? .red : .white.opacity(0.65))
+                            HStack(spacing: 5) {
                                 ForEach(0..<5) { i in
                                     Capsule()
-                                        .fill(i < (controller.isFiring ? 5 : 3) ? Color.green : Color.gray.opacity(0.35))
-                                        .frame(width: 16, height: 6)
+                                        .fill(i < (controller.isFiring ? 5 : 3) ? Color.red : Color.gray.opacity(0.30))
+                                        .frame(width: 17, height: 6)
                                 }
                             }
                         }
                     )
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.red.opacity(controller.isFiring ? 0.8 : 0.22), lineWidth: 1))
 
                 Spacer()
             }
-            .frame(width: 250, height: 430)
+            .frame(width: 252, height: 410)
+
+            // Red activation button embedded on the body
+            Button {
+                controller.fire()
+                pulse.toggle()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.black.opacity(0.75))
+                        .frame(width: 118, height: 118)
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [Color(red: 1.0, green: 0.22, blue: 0.18), Color(red: 0.62, green: 0.0, blue: 0.0), Color(red: 0.20, green: 0.0, blue: 0.0)],
+                                center: .topLeading,
+                                startRadius: 4,
+                                endRadius: 62
+                            )
+                        )
+                        .frame(width: 94, height: 94)
+                        .shadow(color: .red.opacity(controller.isFiring ? 0.95 : 0.45), radius: controller.isFiring ? 26 : 12)
+                    Circle()
+                        .stroke(.white.opacity(0.32), lineWidth: 2)
+                        .frame(width: 94, height: 94)
+                    VStack(spacing: 2) {
+                        Image(systemName: "bolt.fill")
+                            .font(.title2.weight(.black))
+                        Text(controller.isFiring ? "ON" : "FIRE")
+                            .font(.caption.monospaced().weight(.black))
+                    }
+                    .foregroundStyle(.white)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(controller.isFiring)
+            .offset(y: 34)
 
             if controller.isFiring {
                 electricArc
-                    .offset(y: -144)
+                    .offset(y: -92)
             }
         }
     }
 
     private var probeCircle: some View {
         Circle()
-            .fill(.black)
-            .frame(width: 54, height: 54)
-            .overlay(Circle().stroke(.yellow.opacity(0.8), lineWidth: 4))
-            .overlay(Circle().fill(.cyan).frame(width: 14, height: 14).blur(radius: 2))
+            .fill(LinearGradient(colors: [Color(red: 0.02, green: 0.02, blue: 0.025), Color(red: 0.22, green: 0.22, blue: 0.24)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: 58, height: 58)
+            .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 3))
+            .overlay(Circle().stroke(.red.opacity(controller.isFiring ? 0.95 : 0.32), lineWidth: 2).blur(radius: controller.isFiring ? 1.5 : 0))
+            .overlay(Circle().fill(.red).frame(width: 12, height: 12).blur(radius: controller.isFiring ? 3 : 1))
     }
 
     private var electricArc: some View {
@@ -203,7 +284,7 @@ struct ContentView: View {
                     path.addLine(to: CGPoint(x: 22, y: CGFloat([-10, 14, -15, 9][i])))
                     path.addLine(to: CGPoint(x: 42, y: 0))
                 }
-                .stroke(i.isMultiple(of: 2) ? .cyan : .white, style: StrokeStyle(lineWidth: i.isMultiple(of: 2) ? 5 : 2, lineCap: .round, lineJoin: .round))
+                .stroke(i.isMultiple(of: 2) ? .red : .white, style: StrokeStyle(lineWidth: i.isMultiple(of: 2) ? 5 : 2, lineCap: .round, lineJoin: .round))
                 .blur(radius: i.isMultiple(of: 2) ? 1.2 : 0)
                 .opacity(pulse ? 1 : 0.45)
             }
