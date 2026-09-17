@@ -35,6 +35,7 @@ jobs:
       - name: Build archive without signing
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild archive \
             -project TaserSimulator.xcodeproj \
             -scheme TaserSimulator \
