@@ -306,19 +306,8 @@ struct ContentView: View {
     }
 
     private func electricArc(width: CGFloat) -> some View {
-        ZStack {
-            ForEach(0..<5) { i in
-                ElectricBolt(seed: i)
-                    .stroke(i == 0 ? .white : Color(red: 0.25, green: 0.42, blue: 1.0), style: StrokeStyle(lineWidth: i == 0 ? 3 : 7, lineCap: .round, lineJoin: .round))
-                    .blur(radius: i == 0 ? 0 : CGFloat(i) * 0.7)
-                    .opacity(controller.isFiring ? (pulse ? 1.0 : 0.62) : 0.50)
-                    .shadow(color: .blue, radius: controller.isFiring ? 12 : 6)
-            }
-        }
-        .onChange(of: controller.isFiring) { active in
-            if active { pulse.toggle() }
-        }
-        .animation(.easeInOut(duration: 0.075).repeat(while: controller.isFiring), value: pulse)
+        RealisticElectricArc(isActive: controller.isFiring)
+            .opacity(controller.isFiring ? 1.0 : 0.48)
     }
 }
 
@@ -417,6 +406,109 @@ struct ElectricBolt: Shape {
         }
         p.addLine(to: CGPoint(x: rect.maxX - 4, y: rect.midY))
         return p
+    }
+}
+
+struct RealisticElectricArc: View {
+    let isActive: Bool
+    @State private var frame = 0
+
+    private let timer = Timer.publish(every: 0.055, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                // Outer blue plasma glow
+                ForEach(0..<4) { layer in
+                    ElectricBranch(frame: frame, branch: 0, variant: layer)
+                        .stroke(
+                            Color(red: 0.10, green: 0.24, blue: 1.0).opacity(isActive ? 0.35 : 0.18),
+                            style: StrokeStyle(lineWidth: CGFloat(18 - layer * 3), lineCap: .round, lineJoin: .round)
+                        )
+                        .blur(radius: CGFloat(8 + layer * 2))
+                }
+
+                // Main hot bolt: white core with blue edge
+                ElectricBranch(frame: frame, branch: 0, variant: 0)
+                    .stroke(Color(red: 0.20, green: 0.42, blue: 1.0), style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
+                    .shadow(color: Color.blue, radius: isActive ? 18 : 8)
+                ElectricBranch(frame: frame, branch: 0, variant: 0)
+                    .stroke(.white, style: StrokeStyle(lineWidth: 3.2, lineCap: .round, lineJoin: .round))
+                    .shadow(color: .white, radius: isActive ? 8 : 3)
+
+                // Short branching tendrils that flicker around the main arc
+                ForEach(1..<7) { branch in
+                    ElectricBranch(frame: frame, branch: branch, variant: branch)
+                        .stroke(Color(red: 0.40, green: 0.62, blue: 1.0).opacity(isActive ? 0.88 : 0.28), style: StrokeStyle(lineWidth: 3.2, lineCap: .round, lineJoin: .round))
+                        .blur(radius: 0.25)
+                        .shadow(color: .blue, radius: 7)
+                    ElectricBranch(frame: frame, branch: branch, variant: branch)
+                        .stroke(.white.opacity(isActive ? 0.88 : 0.35), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
+                }
+            }
+            .scaleEffect(y: isActive ? 1.0 : 0.92)
+            .opacity(isActive ? (frame.isMultiple(of: 3) ? 0.78 : 1.0) : 0.55)
+            .animation(.linear(duration: 0.05), value: frame)
+            .onReceive(timer) { _ in
+                if isActive {
+                    frame = (frame + 1) % 240
+                }
+            }
+        }
+        .drawingGroup()
+    }
+}
+
+struct ElectricBranch: Shape {
+    let frame: Int
+    let branch: Int
+    let variant: Int
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let points = makePoints(in: rect)
+        guard let first = points.first else { return p }
+        p.move(to: first)
+        for point in points.dropFirst() {
+            p.addLine(to: point)
+        }
+        return p
+    }
+
+    private func makePoints(in rect: CGRect) -> [CGPoint] {
+        let segments = branch == 0 ? 11 : 4
+        var points: [CGPoint] = []
+
+        if branch == 0 {
+            for i in 0...segments {
+                let t = CGFloat(i) / CGFloat(segments)
+                let wave = sin((t * 2.8 + CGFloat(frame) * 0.19 + CGFloat(variant)) * .pi)
+                let jitter = noise(i, frame + variant * 17) * 0.32
+                let y = rect.midY + (wave * 0.12 + jitter) * rect.height
+                let x = rect.minX + t * rect.width
+                points.append(CGPoint(x: x, y: y))
+            }
+        } else {
+            let anchorT = CGFloat(branch) / 7.0
+            let direction: CGFloat = branch.isMultiple(of: 2) ? -1 : 1
+            let startY = rect.midY + noise(branch, frame) * rect.height * 0.16
+            let start = CGPoint(x: rect.minX + anchorT * rect.width, y: startY)
+            points.append(start)
+            for i in 1...segments {
+                let t = CGFloat(i) / CGFloat(segments)
+                let x = start.x + (t * rect.width * 0.16 * (branch < 4 ? -1 : 1))
+                let y = start.y + direction * t * rect.height * (0.16 + abs(noise(i + branch, frame)) * 0.20) + noise(i, frame + branch * 31) * rect.height * 0.08
+                points.append(CGPoint(x: x, y: y))
+            }
+        }
+
+        return points
+    }
+
+    private func noise(_ index: Int, _ tick: Int) -> CGFloat {
+        let n = sin(Double(index * 127 + tick * 311 + branch * 53 + variant * 97) * 12.9898) * 43758.5453
+        let fract = n - floor(n)
+        return CGFloat(fract * 2.0 - 1.0)
     }
 }
 
