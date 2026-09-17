@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build Taser Simulator unsigned IPA
+    name: Build Stun Fun unsigned IPA
     runs-on: macos-15
 
     steps:
@@ -37,11 +37,11 @@ jobs:
           set -o pipefail
           mkdir -p build
           xcodebuild archive \
-            -project TaserSimulator.xcodeproj \
-            -scheme TaserSimulator \
+            -project StunFun.xcodeproj \
+            -scheme StunFun \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$PWD/build/TaserSimulator.xcarchive" \
+            -archivePath "$PWD/build/StunFun.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -50,19 +50,19 @@ jobs:
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
-          APP="$PWD/build/TaserSimulator.xcarchive/Products/Applications/TaserSimulator.app"
+          APP="$PWD/build/StunFun.xcarchive/Products/Applications/Stun Fun.app"
           test -d "$APP"
-          rm -rf build/Payload build/TaserSimulator-unsigned.ipa
+          rm -rf build/Payload build/StunFun-unsigned.ipa
           mkdir -p build/Payload
           cp -R "$APP" build/Payload/
-          (cd build && zip -qry TaserSimulator-unsigned.ipa Payload)
-          ls -lh build/TaserSimulator-unsigned.ipa
+          (cd build && zip -qry StunFun-unsigned.ipa Payload)
+          ls -lh build/StunFun-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TaserSimulator-unsigned-ipa
-          path: build/TaserSimulator-unsigned.ipa
+          name: StunFun-unsigned-ipa
+          path: build/StunFun-unsigned.ipa
           if-no-files-found: error
 
       - name: Upload build log
@@ -77,7 +77,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: unsigned-${{ github.run_number }}
-          name: Taser Simulator unsigned ${{ github.run_number }}
-          files: build/TaserSimulator-unsigned.ipa
+          tag_name: stunfun-unsigned-${{ github.run_number }}
+          name: Stun Fun unsigned ${{ github.run_number }}
+          files: build/StunFun-unsigned.ipa
           make_latest: true
