@@ -137,8 +137,16 @@ struct ContentView: View {
             VStack(spacing: h * 0.016) {
                 Spacer().frame(height: h * 0.24)
 
-                warningPlate
-                    .frame(width: bodyW * 0.62, height: h * 0.22)
+                Button {
+                    controller.fire()
+                    pulse.toggle()
+                } label: {
+                    warningPlate
+                }
+                .buttonStyle(.plain)
+                .disabled(controller.isFiring)
+                .frame(width: bodyW * 0.62, height: h * 0.22)
+                .scaleEffect(controller.isFiring ? 0.98 : 1.0)
 
                 statusLights
                     .frame(width: bodyW * 0.24, height: 34)
@@ -177,9 +185,9 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .disabled(controller.isFiring)
-            .frame(width: bodyW * 0.45, height: h * 0.23)
-            .position(x: centerX, y: h * 0.71)
-            .accessibilityLabel("Fire Stun Fun")
+            .frame(width: bodyW * 0.72, height: h * 0.28)
+            .position(x: centerX, y: h * 0.405)
+            .accessibilityLabel("Activate Stun Fun")
         }
     }
 
