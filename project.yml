@@ -17,10 +17,11 @@ targets:
     type: application
     platform: iOS
     sources:
-      - TaserSimulator
+      - path: TaserSimulator
+        excludes:
+          - "Info.plist"
     resources:
       - TaserSimulator/Resources
-      - TaserSimulator/Assets.xcassets
     settings:
       base:
         PRODUCT_NAME: "Stun Fun"

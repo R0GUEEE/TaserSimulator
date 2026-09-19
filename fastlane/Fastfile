@@ -1,14 +1,15 @@
+opt_out_usage
+
 def resolve_altool!
-  candidates = [
-    '/Applications/Xcode.app/Contents/SharedFrameworks/ContentDelivery.framework/Resources/altool',
-    '/Applications/Xcode.app/Contents/Developer/usr/bin/altool',
-    '/Applications/Xcode_26.3.app/Contents/SharedFrameworks/ContentDelivery.framework/Resources/altool',
-    '/Applications/Xcode_26.3.app/Contents/Developer/usr/bin/altool'
-  ]
+  candidates = Dir['/Applications/Xcode*.app/Contents/SharedFrameworks/ContentDelivery.framework/Resources/altool'] +
+               Dir['/Applications/Xcode*.app/Contents/Developer/usr/bin/altool']
   altool = candidates.find { |p| File.exist?(p) } || `xcrun -f altool`.strip
+  UI.user_error!('altool not found') if altool.to_s.empty?
+
   legacy = '/Applications/Xcode.app/Contents/Applications/Application Loader.app/Contents/Frameworks/ITunesSoftwareService.framework/Support/altool'
   sh("mkdir -p \"#{File.dirname(legacy)}\"")
   sh("ln -sf \"#{altool}\" \"#{legacy}\"")
+  altool
 end
 
 def latest_ipa
@@ -18,22 +19,46 @@ def latest_ipa
 end
 
 def use_api_key_auth?
-  ENV['APP_STORE_CONNECT_API_KEY_ID'].to_s.length > 0 && ENV['APP_STORE_CONNECT_API_ISSUER_ID'].to_s.length > 0
+  !ENV['APP_STORE_CONNECT_API_KEY_ID'].to_s.empty? && !ENV['APP_STORE_CONNECT_API_ISSUER_ID'].to_s.empty?
+end
+
+# altool historically exits 0 even when App Store validation fails, which makes CI
+# report a green run while nothing reaches App Store Connect. Capture the output and
+# fail the lane explicitly when validation/upload errors are present.
+def run_and_enforce!(command)
+  log = 'build/upload.log'
+  sh("#{command} 2>&1 | tee #{log}")
+  output = File.read(log)
+  failure_markers = [
+    'UPLOAD FAILED',
+    'Failed to upload package',
+    'Validation failed',
+    'STATE_ERROR.VALIDATION_ERROR',
+    'ERROR ITMS-',
+    'ERROR: [altool'
+  ]
+  hits = failure_markers.select { |m| output.include?(m) }
+  UI.user_error!("App Store Connect upload failed: #{hits.join(', ')} (see #{log})") unless hits.empty?
+  UI.success('App Store Connect accepted the package for processing.')
 end
 
 platform :ios do
   desc 'Upload the signed Stun Fun IPA using XCTEQ/fastlane-plugin-altool'
   lane :upload_altool do
     resolve_altool!
+    ipa = latest_ipa
+    UI.message("Uploading #{ipa} (#{File.size(ipa)} bytes)")
+
     if use_api_key_auth?
       UI.message('Using App Store Connect API key auth via xcrun altool (plugin only supports Apple ID password auth).')
-      sh("xcrun altool --upload-app --type ios --file \"#{latest_ipa}\" --apiKey \"#{ENV['APP_STORE_CONNECT_API_KEY_ID']}\" --apiIssuer \"#{ENV['APP_STORE_CONNECT_API_ISSUER_ID']}\" --verbose")
+      run_and_enforce!("xcrun altool --upload-app --type ios --file \"#{ipa}\" --apiKey \"#{ENV['APP_STORE_CONNECT_API_KEY_ID']}\" --apiIssuer \"#{ENV['APP_STORE_CONNECT_API_ISSUER_ID']}\" --verbose")
     else
+      UI.message('Using Apple ID password auth via fastlane-plugin-altool.')
       altool(
         altool_username: ENV['FASTLANE_USER'],
         altool_password: ENV['FASTLANE_PASSWORD'],
         altool_app_type: 'ios',
-        altool_ipa_path: latest_ipa,
+        altool_ipa_path: ipa,
         altool_output_format: 'normal'
       )
     end

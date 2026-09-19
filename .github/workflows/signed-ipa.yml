@@ -175,9 +175,20 @@ jobs:
           rm -rf build/verify
           mkdir -p build/verify
           unzip -q build/StunFun-signed.ipa -d build/verify
-          codesign -dv --verbose=4 "build/verify/Payload/Stun Fun.app" 2>&1 | tee build/codesign-verify.log
-          security cms -D -i "build/verify/Payload/Stun Fun.app/embedded.mobileprovision" > build/embedded-profile.plist
+          APP="build/verify/Payload/Stun Fun.app"
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee build/codesign-verify.log
+          security cms -D -i "$APP/embedded.mobileprovision" > build/embedded-profile.plist
           /usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' build/embedded-profile.plist
+
+          # App Store validation rejects builds without a usable app icon, so fail fast here.
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP/Info.plist"
+          test -f "$APP/Assets.car"
+          ICON_COUNT=$(ls -1 "$APP"/*.png 2>/dev/null | wc -l | tr -d ' ')
+          echo "loose icon pngs in bundle: $ICON_COUNT"
+          ICON_NAMES=$(xcrun --sdk iphoneos assetutil --info "$APP/Assets.car" 2>/dev/null | grep -c '"Name" : "AppIcon"' || true)
+          echo "AppIcon entries in Assets.car: $ICON_NAMES"
+          test "$ICON_COUNT" -gt 0 -o "$ICON_NAMES" -gt 0
+          ls -lh "$APP"/*.png 2>/dev/null | head -12 || true
 
       - name: Upload signed IPA to TestFlight/App Store Connect with fastlane altool
         env:
