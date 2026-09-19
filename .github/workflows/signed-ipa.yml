@@ -181,7 +181,7 @@ jobs:
 
       - name: Upload signed IPA to TestFlight/App Store Connect with fastlane altool
         env:
-          IPA_PATH: build/StunFun-signed.ipa
+          IPA_PATH: ${{ github.workspace }}/build/StunFun-signed.ipa
           FASTLANE_USER: dillinv@live.com
         run: |
           set -euo pipefail
