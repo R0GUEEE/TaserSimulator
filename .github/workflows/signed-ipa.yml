@@ -65,12 +65,16 @@ jobs:
 
           # Fail fast with a clear message if the stored API key is not a usable .p8,
           # instead of surfacing a confusing altool/xcodebuild format error later.
-          KEY_HEAD="$(head -c 27 "$KEY_FILE")"
-          echo "API key file: $KEY_FILE ($(wc -c < "$KEY_FILE" | tr -d ' ') bytes, starts with '$KEY_HEAD')"
-          case "$KEY_HEAD" in
-            '-----BEGIN PRIVATE KEY-----') ;;
-            *) echo "::error::APP_STORE_CONNECT_API_KEY_BASE64 does not decode to a PEM .p8 private key"; exit 1 ;;
-          esac
+          echo "API key file: $KEY_FILE ($(wc -c < "$KEY_FILE" | tr -d ' ') bytes)"
+          if head -c 27 "$KEY_FILE" | grep -q 'BEGIN PRIVATE KEY'; then
+            echo "API key is PEM encoded."
+          elif openssl pkey -inform DER -in "$KEY_FILE" -out "$KEY_FILE.pem" -noout 2>/dev/null; then
+            echo "API key was DER encoded; converted to PEM."
+            mv "$KEY_FILE.pem" "$KEY_FILE"
+          else
+            echo "::error::APP_STORE_CONNECT_API_KEY_BASE64 is not a usable .p8 private key (PEM or DER)"
+            exit 1
+          fi
           openssl pkey -in "$KEY_FILE" -noout
           echo "API key validated as a usable private key."
 
