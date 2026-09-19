@@ -1,5 +1,19 @@
 opt_out_usage
 
+require 'open3'
+
+# fastlane may run from the fastlane/ directory; resolve all build paths against the
+# repository root that GitHub Actions gives us.
+def repo_root
+  root = ENV['GITHUB_WORKSPACE'] || Dir.pwd
+  root = Dir.pwd unless File.directory?(File.join(root, 'build')) || File.directory?(File.join(root, 'fastlane'))
+  root
+end
+
+def build_path(*parts)
+  File.join(repo_root, 'build', *parts)
+end
+
 def altool_binary
   candidates = Dir['/Applications/Xcode*.app/Contents/SharedFrameworks/ContentDelivery.framework/Resources/altool'] +
                Dir['/Applications/Xcode*.app/Contents/Developer/usr/bin/altool']
@@ -17,7 +31,8 @@ def resolve_altool_legacy_path!
 end
 
 def latest_ipa
-  ipa = ENV['IPA_PATH'] || Dir['build/StunFun-signed.ipa', 'build/export/*.ipa'].find { |p| File.exist?(p) }
+  candidates = [ENV['IPA_PATH'], build_path('StunFun-signed.ipa'), *Dir[build_path('export', '*.ipa')]].compact
+  ipa = candidates.find { |p| File.exist?(p) }
   UI.user_error!('No signed IPA found') unless ipa && File.exist?(ipa)
   ipa
 end
@@ -39,17 +54,10 @@ FAILURE_MARKERS = [
 
 def run_capturing!(command, log_path)
   FileUtils.mkdir_p(File.dirname(log_path))
-  output = +''
-  failed = false
-  begin
-    output = Actions.sh(command, log: false)
-  rescue StandardError => e
-    failed = true
-    output = e.message
-  end
+  output, status = Open3.capture2e(command)
   File.write(log_path, output)
   hits = FAILURE_MARKERS.select { |m| output.include?(m) }
-  { ok: !failed && hits.empty?, output: output, hits: hits, exit_failed: failed }
+  { ok: status.success? && hits.empty?, output: output, hits: hits, exit_failed: !status.success? }
 end
 
 def log_tail(output, lines = 40)
@@ -88,7 +96,7 @@ platform :ios do
       result = run_capturing!(
         "xcrun altool --upload-app --type ios --file \"#{ipa}\" " \
         "--apiKey \"#{key_id}\" --apiIssuer \"#{issuer}\" --verbose",
-        File.expand_path('build/upload.log')
+        build_path('upload.log')
       )
       break if result[:ok]
 
@@ -103,10 +111,10 @@ platform :ios do
     end
 
     UI.error('altool upload did not succeed; falling back to xcodebuild export upload.')
-    archive = File.expand_path('build/StunFun.xcarchive')
+    archive = build_path('StunFun.xcarchive')
     UI.user_error!('No archive available for fallback upload') unless File.exist?(archive)
 
-    plist = File.expand_path('build/ExportOptionsUpload.plist')
+    plist = build_path('ExportOptionsUpload.plist')
     File.write(plist, <<~PLIST)
       <?xml version="1.0" encoding="UTF-8"?>
       <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -134,10 +142,10 @@ platform :ios do
     PLIST
 
     fallback = run_capturing!(
-      "xcodebuild -exportArchive -archivePath \"#{archive}\" -exportPath \"#{File.expand_path('build/upload-export')}\" " \
+      "xcodebuild -exportArchive -archivePath \"#{archive}\" -exportPath \"#{build_path('upload-export')}\" " \
       "-exportOptionsPlist \"#{plist}\" " \
       "-authenticationKeyPath \"#{key_path}\" -authenticationKeyID \"#{key_id}\" -authenticationKeyIssuerID \"#{issuer}\"",
-      File.expand_path('build/upload-fallback.log')
+      build_path('upload-fallback.log')
     )
 
     unless fallback[:ok]
