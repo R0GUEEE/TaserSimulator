@@ -10,6 +10,10 @@ Join the public beta:
 
 [https://testflight.apple.com/join/rm43Bct4](https://testflight.apple.com/join/rm43Bct4)
 
+## Privacy
+
+Stun Fun does not collect personal data. See [Privacy Policy](PRIVACY.md).
+
 ## Features
 
 - Full-screen black taser-inspired interface
