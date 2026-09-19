@@ -1,15 +1,19 @@
 opt_out_usage
 
-def resolve_altool!
+def altool_binary
   candidates = Dir['/Applications/Xcode*.app/Contents/SharedFrameworks/ContentDelivery.framework/Resources/altool'] +
                Dir['/Applications/Xcode*.app/Contents/Developer/usr/bin/altool']
   altool = candidates.find { |p| File.exist?(p) } || `xcrun -f altool`.strip
   UI.user_error!('altool not found') if altool.to_s.empty?
+  altool
+end
 
+def resolve_altool_legacy_path!
+  # fastlane-plugin-altool hardcodes the legacy Application Loader path; symlink the
+  # real altool binary there so the plugin works on modern Xcode installs.
   legacy = '/Applications/Xcode.app/Contents/Applications/Application Loader.app/Contents/Frameworks/ITunesSoftwareService.framework/Support/altool'
   sh("mkdir -p \"#{File.dirname(legacy)}\"")
-  sh("ln -sf \"#{altool}\" \"#{legacy}\"")
-  altool
+  sh("ln -sf \"#{altool_binary}\" \"#{legacy}\"")
 end
 
 def latest_ipa
@@ -22,38 +26,45 @@ def use_api_key_auth?
   !ENV['APP_STORE_CONNECT_API_KEY_ID'].to_s.empty? && !ENV['APP_STORE_CONNECT_API_ISSUER_ID'].to_s.empty?
 end
 
-# altool historically exits 0 even when App Store validation fails, which makes CI
-# report a green run while nothing reaches App Store Connect. Capture the output and
-# fail the lane explicitly when validation/upload errors are present.
-def run_and_enforce!(command)
-  log = 'build/upload.log'
-  sh("#{command} 2>&1 | tee #{log}")
-  output = File.read(log)
-  failure_markers = [
-    'UPLOAD FAILED',
-    'Failed to upload package',
-    'Validation failed',
-    'STATE_ERROR.VALIDATION_ERROR',
-    'ERROR ITMS-',
-    'ERROR: [altool'
-  ]
-  hits = failure_markers.select { |m| output.include?(m) }
-  UI.user_error!("App Store Connect upload failed: #{hits.join(', ')} (see #{log})") unless hits.empty?
-  UI.success('App Store Connect accepted the package for processing.')
+# altool exits 0 even when App Store validation fails, which makes CI report a green
+# run while nothing reaches App Store Connect. Capture the output and fail explicitly.
+FAILURE_MARKERS = [
+  'UPLOAD FAILED',
+  'Failed to upload package',
+  'STATE_ERROR.VALIDATION_ERROR',
+  'ERROR ITMS-',
+  'ERROR: [altool',
+  "isn't in the correct format"
+].freeze
+
+def run_capturing!(command, log_path)
+  FileUtils.mkdir_p(File.dirname(log_path))
+  output = +''
+  failed = false
+  begin
+    output = Actions.sh(command, log: false)
+  rescue StandardError => e
+    failed = true
+    output = e.message
+  end
+  File.write(log_path, output)
+  hits = FAILURE_MARKERS.select { |m| output.include?(m) }
+  { ok: !failed && hits.empty?, output: output, hits: hits, exit_failed: failed }
+end
+
+def log_tail(output, lines = 40)
+  output.to_s.lines.last(lines).join
 end
 
 platform :ios do
   desc 'Upload the signed Stun Fun IPA using XCTEQ/fastlane-plugin-altool'
   lane :upload_altool do
-    resolve_altool!
     ipa = latest_ipa
     UI.message("Uploading #{ipa} (#{File.size(ipa)} bytes)")
 
-    if use_api_key_auth?
-      UI.message('Using App Store Connect API key auth via xcrun altool (plugin only supports Apple ID password auth).')
-      run_and_enforce!("xcrun altool --upload-app --type ios --file \"#{ipa}\" --apiKey \"#{ENV['APP_STORE_CONNECT_API_KEY_ID']}\" --apiIssuer \"#{ENV['APP_STORE_CONNECT_API_ISSUER_ID']}\" --verbose")
-    else
+    unless use_api_key_auth?
       UI.message('Using Apple ID password auth via fastlane-plugin-altool.')
+      resolve_altool_legacy_path!
       altool(
         altool_username: ENV['FASTLANE_USER'],
         altool_password: ENV['FASTLANE_PASSWORD'],
@@ -61,6 +72,79 @@ platform :ios do
         altool_ipa_path: ipa,
         altool_output_format: 'normal'
       )
+      next
     end
+
+    resolve_altool_legacy_path!
+    key_id = ENV['APP_STORE_CONNECT_API_KEY_ID']
+    issuer = ENV['APP_STORE_CONNECT_API_ISSUER_ID']
+    key_path = File.expand_path("~/private_keys/AuthKey_#{key_id}.p8")
+    UI.user_error!("API key not found at #{key_path}") unless File.exist?(key_path)
+
+    attempts = (ENV['UPLOAD_ATTEMPTS'] || '3').to_i
+    result = nil
+    attempts.times do |i|
+      UI.message("altool upload attempt #{i + 1}/#{attempts}")
+      result = run_capturing!(
+        "xcrun altool --upload-app --type ios --file \"#{ipa}\" " \
+        "--apiKey \"#{key_id}\" --apiIssuer \"#{issuer}\" --verbose",
+        File.expand_path('build/upload.log')
+      )
+      break if result[:ok]
+
+      UI.error("Attempt #{i + 1} failed: #{result[:hits].join(', ')}")
+      UI.message(log_tail(result[:output]))
+      sleep(20) if i < attempts - 1
+    end
+
+    if result && result[:ok]
+      UI.success('App Store Connect accepted the package for processing.')
+      next
+    end
+
+    UI.error('altool upload did not succeed; falling back to xcodebuild export upload.')
+    archive = File.expand_path('build/StunFun.xcarchive')
+    UI.user_error!('No archive available for fallback upload') unless File.exist?(archive)
+
+    plist = File.expand_path('build/ExportOptionsUpload.plist')
+    File.write(plist, <<~PLIST)
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>method</key>
+        <string>app-store-connect</string>
+        <key>destination</key>
+        <string>upload</string>
+        <key>signingStyle</key>
+        <string>manual</string>
+        <key>teamID</key>
+        <string>#{ENV['APPLE_TEAM_ID']}</string>
+        <key>provisioningProfiles</key>
+        <dict>
+          <key>#{ENV['BUNDLE_ID']}</key>
+          <string>#{ENV['PROFILE_NAME']}</string>
+        </dict>
+        <key>manageAppVersionAndBuildNumber</key>
+        <false/>
+        <key>stripSwiftSymbols</key>
+        <true/>
+      </dict>
+      </plist>
+    PLIST
+
+    fallback = run_capturing!(
+      "xcodebuild -exportArchive -archivePath \"#{archive}\" -exportPath \"#{File.expand_path('build/upload-export')}\" " \
+      "-exportOptionsPlist \"#{plist}\" " \
+      "-authenticationKeyPath \"#{key_path}\" -authenticationKeyID \"#{key_id}\" -authenticationKeyIssuerID \"#{issuer}\"",
+      File.expand_path('build/upload-fallback.log')
+    )
+
+    unless fallback[:ok]
+      UI.message(log_tail(fallback[:output], 60))
+      UI.user_error!("Both altool and xcodebuild upload paths failed. First failure: #{result && result[:hits].join(', ')}")
+    end
+
+    UI.success('App Store Connect accepted the package for processing (xcodebuild upload).')
   end
 end
