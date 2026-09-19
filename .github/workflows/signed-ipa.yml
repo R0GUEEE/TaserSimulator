@@ -59,8 +59,20 @@ jobs:
           mkdir -p build/signing "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/private_keys"
           printf '%s' '${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}' | base64 --decode > build/signing/distribution.p12
           printf '%s' '${{ secrets.STUNFUN_MOBILEPROVISION_BASE64 }}' | base64 --decode > build/signing/StunFun.mobileprovision
-          printf '%s' "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode > "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
-          chmod 600 "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+          KEY_FILE="$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+          printf '%s' "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          # Fail fast with a clear message if the stored API key is not a usable .p8,
+          # instead of surfacing a confusing altool/xcodebuild format error later.
+          KEY_HEAD="$(head -c 27 "$KEY_FILE")"
+          echo "API key file: $KEY_FILE ($(wc -c < "$KEY_FILE" | tr -d ' ') bytes, starts with '$KEY_HEAD')"
+          case "$KEY_HEAD" in
+            '-----BEGIN PRIVATE KEY-----') ;;
+            *) echo "::error::APP_STORE_CONNECT_API_KEY_BASE64 does not decode to a PEM .p8 private key"; exit 1 ;;
+          esac
+          openssl pkey -in "$KEY_FILE" -noout
+          echo "API key validated as a usable private key."
 
           # Verify the P12 password before importing into the temporary keychain.
           openssl pkcs12 -in build/signing/distribution.p12 -passin pass:"$P12_PASSWORD" -nokeys -nodes >/tmp/p12-cert.pem
