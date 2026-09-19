@@ -1,0 +1,169 @@
+name: Build signed IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signed-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Stun Fun signed IPA
+    runs-on: macos-15
+
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      BUNDLE_ID: com.r0gueee.stunfun
+      PROFILE_NAME: StunFun
+      KEYCHAIN_PASSWORD: temporary-ci-keychain-password
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Validate signing secrets
+        run: |
+          set -euo pipefail
+          test -n "${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}"
+          test -n "${{ secrets.STUNFUN_MOBILEPROVISION_BASE64 }}"
+          test -n "$APPLE_TEAM_ID"
+
+      - name: Install signing certificate and provisioning profile
+        run: |
+          set -euo pipefail
+          mkdir -p build/signing "$HOME/Library/MobileDevice/Provisioning Profiles"
+          printf '%s' '${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}' | base64 --decode > build/signing/distribution.p12
+          printf '%s' '${{ secrets.STUNFUN_MOBILEPROVISION_BASE64 }}' | base64 --decode > build/signing/StunFun.mobileprovision
+
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< "$(security cms -D -i build/signing/StunFun.mobileprovision)")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print Name' /dev/stdin <<< "$(security cms -D -i build/signing/StunFun.mobileprovision)")
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          cp build/signing/StunFun.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build/signing/stunfun.keychain-db
+          security set-keychain-settings -lut 21600 build/signing/stunfun.keychain-db
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build/signing/stunfun.keychain-db
+          security import build/signing/distribution.p12 \
+            -k build/signing/stunfun.keychain-db \
+            -P '${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}' \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security list-keychains -d user -s build/signing/stunfun.keychain-db login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build/signing/stunfun.keychain-db
+          security find-identity -v -p codesigning build/signing/stunfun.keychain-db
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Archive signed app
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild archive \
+            -project StunFun.xcodeproj \
+            -scheme StunFun \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/StunFun.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            MARKETING_VERSION="1.0" \
+            | tee build/xcodebuild.log
+
+      - name: Create export options
+        run: |
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>destination</key>
+            <string>export</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Export signed IPA
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$PWD/build/StunFun.xcarchive" \
+            -exportPath "$PWD/build/export" \
+            -exportOptionsPlist "$PWD/build/ExportOptions.plist" \
+            | tee build/export.log
+          IPA="$(find build/export -maxdepth 2 -type f -name '*.ipa' | head -n 1)"
+          test -f "$IPA"
+          cp "$IPA" build/StunFun-signed.ipa
+          ls -lh build/StunFun-signed.ipa
+
+      - name: Verify signed IPA
+        run: |
+          set -euo pipefail
+          rm -rf build/verify
+          mkdir -p build/verify
+          unzip -q build/StunFun-signed.ipa -d build/verify
+          codesign -dv --verbose=4 "build/verify/Payload/Stun Fun.app" 2>&1 | tee build/codesign-verify.log
+          security cms -D -i "build/verify/Payload/Stun Fun.app/embedded.mobileprovision" > build/embedded-profile.plist
+          /usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' build/embedded-profile.plist
+
+      - name: Upload signed IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StunFun-signed-ipa
+          path: build/StunFun-signed.ipa
+          if-no-files-found: error
+
+      - name: Upload signing/build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-build-logs
+          path: |
+            build/xcodebuild.log
+            build/export.log
+            build/codesign-verify.log
+            build/ExportOptions.plist
+          if-no-files-found: ignore
+
+      - name: Create/update release on main
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: stunfun-signed-${{ github.run_number }}
+          name: Stun Fun signed ${{ github.run_number }}
+          files: build/StunFun-signed.ipa
+          make_latest: true
