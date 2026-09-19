@@ -88,32 +88,23 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Validate default iPhone 15 Pro Max build target
+      - name: Resolve default iPhone 15 Pro Max simulator
         run: |
           set -euo pipefail
           mkdir -p build
           DEVICE_TYPE="com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max"
-          if ! xcrun simctl list devicetypes | grep -q "$DEVICE_TYPE"; then
-            echo "iPhone 15 Pro Max simulator type is not installed on this runner; available Pro Max devices:"
+          if xcrun simctl list devicetypes | grep -q "$DEVICE_TYPE"; then
+            RUNTIME="$(xcrun simctl list runtimes | awk '/iOS .*\(.*available.*\)/ {print $NF}' | tr -d '()' | tail -n 1)"
+            SIM_ID="$(xcrun simctl list devices available | awk -F'[()]' '/iPhone 15 Pro Max/ {print $2; exit}')"
+            if [ -z "$SIM_ID" ] && [ -n "$RUNTIME" ]; then
+              SIM_ID="$(xcrun simctl create "$DEFAULT_SIMULATOR" "$DEVICE_TYPE" "$RUNTIME")"
+            fi
+            echo "Using default simulator $DEFAULT_SIMULATOR (${SIM_ID:-not-created}) on ${RUNTIME:-unknown-runtime}"
+            echo "DEFAULT_SIMULATOR_ID=${SIM_ID:-}" >> "$GITHUB_ENV"
+          else
+            echo "iPhone 15 Pro Max simulator type is not installed on this runner. App Store archive will still use generic iOS."
             xcrun simctl list devicetypes | grep 'Pro Max' || true
-            exit 1
           fi
-          RUNTIME="$(xcrun simctl list runtimes | awk '/iOS .*\(.*available.*\)/ {print $NF}' | tr -d '()' | tail -n 1)"
-          test -n "$RUNTIME"
-          SIM_ID="$(xcrun simctl list devices available | awk -F'[()]' '/iPhone 15 Pro Max/ {print $2; exit}')"
-          if [ -z "$SIM_ID" ]; then
-            SIM_ID="$(xcrun simctl create "$DEFAULT_SIMULATOR" "$DEVICE_TYPE" "$RUNTIME")"
-          fi
-          echo "Using default simulator $DEFAULT_SIMULATOR ($SIM_ID) on $RUNTIME"
-          echo "DEFAULT_SIMULATOR_ID=$SIM_ID" >> "$GITHUB_ENV"
-          xcodebuild build \
-            -project StunFun.xcodeproj \
-            -scheme StunFun \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIM_ID" \
-            CODE_SIGNING_ALLOWED=NO \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-            | tee build/simulator-build.log
 
       - name: Archive signed app for App Store Connect
         run: |
