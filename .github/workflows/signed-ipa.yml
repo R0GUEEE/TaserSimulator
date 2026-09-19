@@ -36,8 +36,11 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install build tools
+        run: |
+          brew install xcodegen
+          gem install fastlane -N
+          gem install fastlane-plugin-altool -N
 
       - name: Validate signing and upload secrets
         run: |
@@ -176,15 +179,13 @@ jobs:
           security cms -D -i "build/verify/Payload/Stun Fun.app/embedded.mobileprovision" > build/embedded-profile.plist
           /usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' build/embedded-profile.plist
 
-      - name: Upload signed IPA to TestFlight/App Store Connect
+      - name: Upload signed IPA to TestFlight/App Store Connect with fastlane altool
+        env:
+          IPA_PATH: build/StunFun-signed.ipa
+          FASTLANE_USER: dillinv@live.com
         run: |
           set -euo pipefail
-          xcrun altool --upload-app \
-            --type ios \
-            --file build/StunFun-signed.ipa \
-            --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
-            --apiIssuer "$APP_STORE_CONNECT_API_ISSUER_ID" \
-            --verbose
+          fastlane ios upload_altool
 
       - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v4
